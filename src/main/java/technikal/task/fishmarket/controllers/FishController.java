@@ -25,6 +25,7 @@ import org.springframework.web.multipart.MultipartFile;
 import jakarta.validation.Valid;
 import technikal.task.fishmarket.models.Fish;
 import technikal.task.fishmarket.models.FishDto;
+import technikal.task.fishmarket.models.FishImage;
 import technikal.task.fishmarket.services.FishRepository;
 
 @Controller
@@ -50,18 +51,23 @@ public class FishController {
 	
 	@GetMapping("/delete")
 	public String deleteFish(@RequestParam int id) {
-		
-		try {
-			
-			Fish fish = repo.findById(id).get();
-			
-			Path imagePath = Paths.get("public/images/"+fish.getImageFileName());
-			Files.delete(imagePath);
-			repo.delete(fish);
-			
-		}catch(Exception ex) {
-			System.out.println("Exception: " + ex.getMessage());
-		}
+
+        try {
+            Fish fish = repo.findById(id).orElseThrow();
+
+            for (FishImage img : fish.getImages()) {
+                try {
+                    Path imagePath = Paths.get("public/images/" + img.getFileName());
+                    Files.deleteIfExists(imagePath);
+                } catch (Exception ex) {
+                    System.out.println("Cannot delete image file: " + ex.getMessage());
+                }
+            }
+            repo.delete(fish);
+
+        } catch (Exception ex) {
+            System.out.println("Exception: " + ex.getMessage());
+        }
 		
 		return "redirect:/fish";
 	}
@@ -69,18 +75,21 @@ public class FishController {
 	@PostMapping("/create")
 	public String addFish(@Valid @ModelAttribute FishDto fishDto, BindingResult result) {
 		
-		if(fishDto.getImageFile().isEmpty()) {
+		if(fishDto.getImageFiles().isEmpty()) {
 			result.addError(new FieldError("fishDto", "imageFile", "Потрібне фото рибки"));
 		}
 		
 		if(result.hasErrors()) {
 			return "createFish";
 		}
-		
-		MultipartFile image = fishDto.getImageFile();
+
 		Date catchDate = new Date();
-		String  storageFileName = catchDate.getTime() + "_" + image.getOriginalFilename();
-		
+
+        Fish fish = new Fish();
+        fish.setCatchDate(catchDate);
+        fish.setName(fishDto.getName());
+        fish.setPrice(fishDto.getPrice());
+
 		try {
 			String uploadDir = "public/images/";
 			Path uploadPath = Paths.get(uploadDir);
@@ -88,21 +97,29 @@ public class FishController {
 			if(!Files.exists(uploadPath)) {
 				Files.createDirectories(uploadPath);
 			}
-			
-			try(InputStream inputStream = image.getInputStream()){
-				Files.copy(inputStream, Paths.get(uploadDir+storageFileName), StandardCopyOption.REPLACE_EXISTING);
-			}
+
+            for (MultipartFile image : fishDto.getImageFiles()) {
+                if (image.isEmpty()) {
+                    continue;
+                }
+
+                String storageFileName = catchDate.getTime() + "_" + image.getOriginalFilename();
+
+                try (InputStream inputStream = image.getInputStream()) {
+                    Files.copy(inputStream,
+                            uploadPath.resolve(storageFileName),
+                            StandardCopyOption.REPLACE_EXISTING);
+                }
+
+                FishImage fishImage = new FishImage();
+                fishImage.setFileName(storageFileName);
+                fishImage.setFish(fish);
+                fish.getImages().add(fishImage);
+            }
 			
 		}catch(Exception ex) {
 			System.out.println("Exception: " + ex.getMessage());
 		}
-		
-		Fish fish = new Fish();
-		
-		fish.setCatchDate(catchDate);
-		fish.setImageFileName(storageFileName);
-		fish.setName(fishDto.getName());
-		fish.setPrice(fishDto.getPrice());
 		
 		repo.save(fish);
 		
